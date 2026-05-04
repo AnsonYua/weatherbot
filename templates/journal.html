@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="band">
+  <div>
+    <h1>Paper journal</h1>
+    <p>Use this as your evidence log before risking real money.</p>
+  </div>
+  <div class="stats">
+    <div><span>{{ summary.total_count }}</span><small>total</small></div>
+    <div><span>{{ "%.0f%%"|format(summary.win_rate * 100) }}</span><small>win rate</small></div>
+    <div><span>${{ "%.2f"|format(summary.pnl) }}</span><small>closed P/L</small></div>
+  </div>
+</section>
+
+<section class="panel">
+  {% for trade in trades %}
+  <div class="trade-row">
+    <span>{{ trade.created_at[:19] }}</span>
+    <strong>{{ trade.side }}</strong>
+    <a href="{{ url_for('market_detail', market_id=trade.market_id) }}">{{ trade.title }}</a>
+    <span>${{ "%.2f"|format(trade.size_usd) }} at {{ "%.3f"|format(trade.price) }}</span>
+    <span>{{ "%+.1f%%"|format(trade.edge * 100) }}</span>
+  </div>
+  {% else %}
+  <p>No paper trades yet. Use the scanner to log the first proposed trade.</p>
+  {% endfor %}
+</section>
+{% endblock %}

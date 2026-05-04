@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="band">
+  <div>
+    <h1>Read-only Polymarket weather scanner</h1>
+    <p>Hong Kong Observatory temperature markets only. No keys, wallet, or live orders.</p>
+  </div>
+  <div class="stats">
+    <div><span>{{ summary.total_count }}</span><small>paper logs</small></div>
+    <div><span>{{ summary.open_count }}</span><small>open paper</small></div>
+    <div><span>${{ "%.2f"|format(summary.pnl) }}</span><small>closed P/L</small></div>
+  </div>
+</section>
+
+<section class="panel bankroll-panel">
+  <form method="get" action="{{ url_for('dashboard') }}" class="bankroll-form">
+    <label for="bankroll">Bankroll</label>
+    <input id="bankroll" name="bankroll" type="number" min="1" step="1" value="{{ '%.0f'|format(bankroll) }}">
+    <button type="submit">Update Kelly</button>
+  </form>
+  <p>Kelly uses the selected side probability and market price. 25% Kelly is shown as the safer paper-trading size.</p>
+</section>
+
+<section class="table-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>Market</th>
+        <th>City</th>
+        <th>Bucket</th>
+        <th>Model</th>
+        <th>Market</th>
+        <th>Edge</th>
+        <th>Kelly</th>
+        <th>25% Kelly</th>
+        <th>Action</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for signal in signals %}
+      <tr>
+        <td>
+          <a class="market-title" href="{{ url_for('market_detail', market_id=signal.market.id) }}">{{ signal.market.title }}</a>
+          <small>{{ signal.reason }}</small>
+          {% if signal.forecast and signal.forecast.metadata.confidence_reason %}
+          <small>{{ signal.forecast.metadata.confidence_reason }}</small>
+          {% endif %}
+        </td>
+        <td>{{ signal.market.city|title }}</td>
+        <td>{{ signal.market.bucket.label }}</td>
+        <td>{{ "%.1f%%"|format(signal.side_probability * 100) }}</td>
+        <td>{{ "%.1f%%"|format(signal.market_probability * 100) }}</td>
+        <td class="{{ 'positive' if signal.edge > 0 else 'negative' }}">{{ "%+.1f%%"|format(signal.edge * 100) }}</td>
+        <td>
+          <strong>{{ "%.1f%%"|format(signal.kelly_fraction * 100) }}</strong>
+          <small>${{ "%.2f"|format(bankroll * signal.kelly_fraction) }}</small>
+        </td>
+        <td>
+          <strong>${{ "%.2f"|format(bankroll * signal.kelly_fraction * 0.25) }}</strong>
+          <small>quarter Kelly</small>
+        </td>
+        <td><span class="pill {{ signal.confidence }}">{{ signal.action }}</span></td>
+        <td>
+          {% if signal.action != "WAIT" %}
+          <form method="post" action="{{ url_for('add_paper_trade') }}">
+            <input type="hidden" name="market_id" value="{{ signal.market.id }}">
+            <input type="hidden" name="title" value="{{ signal.market.title }}">
+            <input type="hidden" name="side" value="{{ signal.side }}">
+            <input type="hidden" name="price" value="{{ signal.market_probability }}">
+            <input type="hidden" name="model_probability" value="{{ signal.side_probability }}">
+            <input type="hidden" name="edge" value="{{ signal.edge }}">
+            <input type="hidden" name="size_usd" value="{{ bankroll * signal.kelly_fraction * 0.25 }}">
+            <button>Paper</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="10" class="empty">No parseable active weather temperature markets found in the current Gamma scan.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endblock %}

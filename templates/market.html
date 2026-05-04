@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="band">
+  <div>
+    <h1>{{ signal.market.title }}</h1>
+    <p>{{ signal.market.city|title }} / {{ signal.market.bucket.label }} / {{ signal.reason }}</p>
+  </div>
+  <a class="external" href="{{ signal.market.url }}">Open Polymarket</a>
+</section>
+
+<section class="grid">
+  <div class="panel">
+    <h2>Signal</h2>
+    <dl>
+      <dt>Action</dt><dd>{{ signal.action }}</dd>
+      <dt>Side</dt><dd>{{ signal.side }}</dd>
+      <dt>Model probability</dt><dd>{{ "%.1f%%"|format(signal.model_probability * 100) }}</dd>
+      <dt>Market probability</dt><dd>{{ "%.1f%%"|format(signal.market_probability * 100) }}</dd>
+      <dt>Edge</dt><dd>{{ "%+.1f%%"|format(signal.edge * 100) }}</dd>
+      <dt>Liquidity</dt><dd>${{ "%.0f"|format(signal.market.liquidity) }}</dd>
+      <dt>Spread</dt><dd>{{ "%.1f%%"|format((signal.market.spread or 0) * 100) }}</dd>
+    </dl>
+  </div>
+  <div class="panel">
+    <h2>Forecast</h2>
+    {% if signal.forecast %}
+    {% set meta = signal.forecast.metadata %}
+    <dl>
+      <dt>Source</dt><dd>{{ signal.forecast.source }}</dd>
+      <dt>Date</dt><dd>{{ signal.forecast.forecast_date }}</dd>
+      <dt>HKO forecast</dt><dd>{{ "%.1fC"|format(meta.hko_point or signal.forecast.point_value) }}</dd>
+      <dt>Samples</dt><dd>{{ signal.forecast.samples|length }}</dd>
+      <dt>Why</dt><dd>{{ meta.confidence_reason or "Probability is counted from the calibrated sample distribution." }}</dd>
+    </dl>
+    {% else %}
+    <p>No forecast available for this market date yet.</p>
+    {% endif %}
+  </div>
+</section>
+
+{% if signal.forecast %}
+{% set meta = signal.forecast.metadata %}
+<section class="panel">
+  <h2>Probability Breakdown</h2>
+  <dl>
+    <dt>HKO anchor</dt><dd>{{ "%.1fC"|format(meta.hko_point or signal.forecast.point_value) }}</dd>
+    <dt>Season baseline</dt><dd>{{ "%.1fC"|format(meta.seasonal_baseline or signal.forecast.point_value) }}</dd>
+    <dt>HKO history rows</dt><dd>{{ meta.historical_sample_count or 0 }}</dd>
+    <dt>Open-Meteo</dt>
+    <dd>
+      {% if meta.open_meteo_available %}
+      median {{ "%.1fC"|format(meta.open_meteo.median) }}, range {{ "%.1fC"|format(meta.open_meteo.min) }} to {{ "%.1fC"|format(meta.open_meteo.max) }}, {{ meta.open_meteo.count }} samples
+      {% else %}
+      unavailable; model fell back to HKO-only calibration
+      {% endif %}
+    </dd>
+    <dt>Disagreement</dt>
+    <dd>{% if meta.disagreement_c is not none %}{{ "%+.1fC"|format(meta.disagreement_c) }}{% else %}n/a{% endif %}</dd>
+    <dt>Adjusted center</dt><dd>{{ "%.1fC"|format(meta.center_c or signal.forecast.point_value) }}</dd>
+    <dt>Spread factor</dt><dd>{{ "%.2f"|format(meta.spread_factor or 1) }}</dd>
+  </dl>
+</section>
+{% endif %}
+
+<section class="panel">
+  <h2>Paper Trades</h2>
+  {% for trade in trades %}
+  <div class="trade-row">
+    <span>{{ trade.created_at[:19] }}</span>
+    <strong>{{ trade.side }}</strong>
+    <span>${{ "%.2f"|format(trade.size_usd) }} at {{ "%.3f"|format(trade.price) }}</span>
+    <span>{{ trade.status }}</span>
+  </div>
+  {% else %}
+  <p>No paper trades logged for this market.</p>
+  {% endfor %}
+</section>
+{% endblock %}
