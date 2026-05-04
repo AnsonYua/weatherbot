@@ -27,6 +27,7 @@ class HKOMarketProbabilityEngine:
         hko_point: float,
         history: list[dict[str, Any]],
         open_meteo_samples: list[float] | None = None,
+        observed_temperature: float | None = None,
     ) -> ProbabilityResult:
         candidates = self._seasonal_candidates(history, target_date)
         values = [row["value"] for row in candidates]
@@ -43,7 +44,13 @@ class HKOMarketProbabilityEngine:
             )
 
         baseline = median(values)
-        historical_offsets = [value - baseline for value in values]
+        horizon_days = max(0, (target_date - date.today()).days)
+        error_scale = self._forecast_error_scale(horizon_days)
+        error_cap = self._forecast_error_cap(horizon_days)
+        historical_offsets = [
+            _clamp((value - baseline) * error_scale, -error_cap, error_cap)
+            for value in values
+        ]
         om_samples = [float(value) for value in (open_meteo_samples or []) if value is not None]
         om_summary = self._open_meteo_summary(om_samples)
         disagreement = (om_summary["median"] - hko_point) if om_summary else 0.0
@@ -54,8 +61,9 @@ class HKOMarketProbabilityEngine:
         if om_samples:
             om_center = median(om_samples)
             samples.extend(round(center + (value - om_center) * 0.5, 1) for value in om_samples)
+        samples = self._apply_observed_constraint(samples, metric, target_date, observed_temperature)
 
-        source = "HKO 9-day forecast calibrated with HKO history"
+        source = "HKO 9-day forecast calibrated with HKO forecast-error proxy"
         if om_summary:
             source += " and Open-Meteo model agreement"
         else:
@@ -72,6 +80,10 @@ class HKOMarketProbabilityEngine:
             "disagreement_c": round(disagreement, 2) if om_summary else None,
             "center_c": round(center, 2),
             "spread_factor": round(spread_factor, 2),
+            "forecast_error_scale": round(error_scale, 2),
+            "forecast_error_cap_c": round(error_cap, 2),
+            "observed_temperature_c": observed_temperature,
+            "observed_constraint_applied": observed_temperature is not None and target_date == date.today(),
             "confidence_reason": self.confidence_reason(len(values), disagreement if om_summary else None),
         }
         return ProbabilityResult(samples=samples, source=source, metadata=metadata)
@@ -132,9 +144,38 @@ class HKOMarketProbabilityEngine:
             return 0.85
         return min(1.8, 1.0 + abs_disagreement / 3.0)
 
+    def _forecast_error_scale(self, horizon_days: int) -> float:
+        if horizon_days <= 0:
+            return 0.35
+        if horizon_days == 1:
+            return 0.45
+        if horizon_days <= 3:
+            return 0.55
+        return 0.65
+
+    def _forecast_error_cap(self, horizon_days: int) -> float:
+        return min(3.5, 1.6 + horizon_days * 0.4)
+
+    def _apply_observed_constraint(
+        self,
+        samples: list[float],
+        metric: str,
+        target_date: date,
+        observed_temperature: float | None,
+    ) -> list[float]:
+        if observed_temperature is None or target_date != date.today():
+            return samples
+        if metric == "max":
+            return [max(value, observed_temperature) for value in samples]
+        return [min(value, observed_temperature) for value in samples]
+
 
 def _day_distance(left: date, right: date) -> int:
     left_key = date(2000, left.month, left.day).timetuple().tm_yday
     right_key = date(2000, right.month, right.day).timetuple().tm_yday
     diff = abs(left_key - right_key)
     return min(diff, 366 - diff)
+
+
+def _clamp(value: float, lower: float, upper: float) -> float:
+    return max(lower, min(upper, value))

@@ -106,6 +106,7 @@ class HKOClient:
         self.open_meteo = open_meteo or OpenMeteoClient(timeout=timeout)
         self.probability_engine = HKOMarketProbabilityEngine()
         self._forecast_cache: dict[str, Any] | None = None
+        self._current_cache: dict[str, Any] | None = None
         self._history_cache: dict[tuple[str, int | None], list[dict[str, Any]]] = {}
 
     def forecast(self, city: str, target_date: date, metric: str, unit: str = "C") -> Forecast | None:
@@ -127,6 +128,7 @@ class HKOClient:
                 hko_point=point,
                 history=self.historical_temperatures(metric),
                 open_meteo_samples=open_meteo_samples,
+                observed_temperature=self.current_hko_temperature() if target_date == date.today() else None,
             )
             return Forecast(
                 city="hong kong",
@@ -197,6 +199,18 @@ class HKOClient:
         self._history_cache[cache_key] = rows
         return rows
 
+    def current_hko_temperature(self) -> float | None:
+        data = self._current_data()
+        if not data:
+            return None
+        for row in data.get("temperature", {}).get("data", []):
+            if row.get("place") == "Hong Kong Observatory":
+                try:
+                    return float(row.get("value"))
+                except (TypeError, ValueError):
+                    return None
+        return None
+
     def _forecast_data(self) -> dict[str, Any] | None:
         if self._forecast_cache is not None:
             return self._forecast_cache
@@ -211,6 +225,21 @@ class HKOClient:
         except requests.RequestException:
             self._forecast_cache = None
         return self._forecast_cache
+
+    def _current_data(self) -> dict[str, Any] | None:
+        if self._current_cache is not None:
+            return self._current_cache
+        try:
+            response = requests.get(
+                self.forecast_base,
+                params={"dataType": "rhrread", "lang": "en"},
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            self._current_cache = response.json()
+        except requests.RequestException:
+            self._current_cache = None
+        return self._current_cache
 
 
 class OpenMeteoClient:

@@ -58,6 +58,15 @@
     <dd>{% if meta.disagreement_c is not none %}{{ "%+.1fC"|format(meta.disagreement_c) }}{% else %}n/a{% endif %}</dd>
     <dt>Adjusted center</dt><dd>{{ "%.1fC"|format(meta.center_c or signal.forecast.point_value) }}</dd>
     <dt>Spread factor</dt><dd>{{ "%.2f"|format(meta.spread_factor or 1) }}</dd>
+    <dt>Error proxy</dt><dd>scale {{ "%.2f"|format(meta.forecast_error_scale or 1) }}, cap {{ "%.1fC"|format(meta.forecast_error_cap_c or 0) }}</dd>
+    <dt>Current HKO temp</dt>
+    <dd>
+      {% if meta.observed_temperature_c is not none %}
+      {{ "%.1fC"|format(meta.observed_temperature_c) }}{% if meta.observed_constraint_applied %}, applied to same-day samples{% endif %}
+      {% else %}
+      n/a
+      {% endif %}
+    </dd>
   </dl>
 </section>
 {% endif %}

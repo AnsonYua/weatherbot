@@ -115,3 +115,24 @@ def test_signal_uses_no_probability_for_no_side():
     assert signal.side == "NO"
     assert signal.side_probability == 1.0
     assert signal.kelly_fraction == 1.0
+
+
+def test_signal_waits_on_unproven_lottery_tail():
+    forecast = Forecast(
+        city="nyc",
+        forecast_date=date(2026, 5, 5),
+        metric="max",
+        point_value=75,
+        samples=[70] * 92 + [80] * 8,
+        source="test",
+        generated_at=datetime.now(timezone.utc),
+    )
+    market = make_market()
+    market = Market(**{**market.__dict__, "yes_price": 0.002, "no_price": 0.998, "spread": 0.002})
+    engine = SignalEngine(FakePoly(), FakeWeather(forecast))
+    signal = engine.build_signal(market)
+
+    assert signal is not None
+    assert signal.side == "YES"
+    assert signal.action == "WAIT"
+    assert "lottery tail" in signal.reason

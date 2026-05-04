@@ -81,6 +81,8 @@ class SignalEngine:
             blockers.append(f"spread above {self.max_spread:.0%}")
         if market.liquidity < self.min_liquidity:
             blockers.append(f"liquidity below ${self.min_liquidity:.0f}")
+        if market_probability < 0.01 and side_probability < 0.15:
+            blockers.append("lottery tail below 1% needs at least 15% model probability")
 
         if blockers:
             action = "WAIT"

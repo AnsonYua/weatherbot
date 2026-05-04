@@ -53,6 +53,29 @@ def test_hko_forecast_uses_official_max_temp(monkeypatch):
     assert "Hong Kong Observatory" in forecast.source
 
 
+def test_hko_current_temperature_parses_observatory_station(monkeypatch):
+    class Response:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "temperature": {
+                    "data": [
+                        {"place": "King's Park", "value": 22, "unit": "C"},
+                        {"place": "Hong Kong Observatory", "value": 23, "unit": "C"},
+                    ]
+                }
+            }
+
+    def fake_get(*args, **kwargs):
+        return Response()
+
+    monkeypatch.setattr("weatherbot.clients.requests.get", fake_get)
+
+    assert HKOClient().current_hko_temperature() == 23.0
+
+
 def test_hko_calibrated_samples_shift_history_to_forecast(monkeypatch):
     client = HKOClient()
     rows = [
@@ -65,4 +88,4 @@ def test_hko_calibrated_samples_shift_history_to_forecast(monkeypatch):
 
     samples = client.calibrated_samples("max", date(2026, 5, 5), point=24.0, years_back=5, window_days=7)
 
-    assert samples == [21.7, 24.0, 26.3]
+    assert samples == [23.2, 24.0, 24.8]

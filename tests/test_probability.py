@@ -54,3 +54,28 @@ def test_strong_agreement_tightens_distribution():
 
     assert result.metadata["spread_factor"] == 0.85
     assert result.metadata["confidence_reason"].startswith("Higher confidence")
+
+
+def test_same_day_observed_temperature_clamps_max_samples():
+    today = date.today()
+    engine = HKOMarketProbabilityEngine(years_back=5, window_days=7)
+    result = engine.build_temperature_distribution(
+        "max",
+        today,
+        24.0,
+        history_rows(),
+        [24.0, 24.2, 24.4],
+        observed_temperature=23.0,
+    )
+
+    assert min(result.samples) >= 23.0
+    assert result.metadata["observed_constraint_applied"] is True
+
+
+def test_forecast_error_proxy_reduces_far_tail_probability():
+    today = date.today()
+    engine = HKOMarketProbabilityEngine(years_back=5, window_days=7)
+    result = engine.build_temperature_distribution("max", today, 24.0, history_rows(), [24.0, 24.1, 24.2])
+    far_tail = TemperatureBucket("max", "below", "C", threshold=20)
+
+    assert engine.probability(result.samples, far_tail) == 0.0
