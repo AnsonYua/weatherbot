@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -109,9 +110,15 @@ class HKOClient:
         self._current_cache: dict[str, Any] | None = None
         self._history_cache: dict[tuple[str, int | None], list[dict[str, Any]]] = {}
 
+    def local_today(self, city: str = "hong kong") -> date:
+        coords = CITY_COORDS.get(city.lower())
+        tz_name = coords[2] if coords else "UTC"
+        return datetime.now(ZoneInfo(tz_name)).date()
+
     def forecast(self, city: str, target_date: date, metric: str, unit: str = "C") -> Forecast | None:
         if city.lower() != "hong kong" or unit.upper() != "C":
             return None
+        local_today = self.local_today(city)
         data = self._forecast_data()
         if not data:
             return None
@@ -128,7 +135,8 @@ class HKOClient:
                 hko_point=point,
                 history=self.historical_temperatures(metric),
                 open_meteo_samples=open_meteo_samples,
-                observed_temperature=self.current_hko_temperature() if target_date == date.today() else None,
+                observed_temperature=self.current_hko_temperature() if target_date == local_today else None,
+                reference_date=local_today,
             )
             return Forecast(
                 city="hong kong",

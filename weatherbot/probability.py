@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
+from itertools import groupby
 from statistics import mean, median
 from typing import Any
 
@@ -28,40 +29,62 @@ class HKOMarketProbabilityEngine:
         history: list[dict[str, Any]],
         open_meteo_samples: list[float] | None = None,
         observed_temperature: float | None = None,
+        reference_date: date | None = None,
     ) -> ProbabilityResult:
+        effective_today = reference_date or date.today()
+        om_samples = [float(value) for value in (open_meteo_samples or []) if value is not None]
+        om_summary = self._open_meteo_summary(om_samples)
         candidates = self._seasonal_candidates(history, target_date)
-        values = [row["value"] for row in candidates]
+        values = self._seasonal_yearly_values(candidates)
         if not values:
+            samples = self._fallback_samples(hko_point, om_samples)
+            samples = self._apply_observed_constraint(
+                samples,
+                metric,
+                target_date,
+                observed_temperature,
+                effective_today,
+            )
             return ProbabilityResult(
-                samples=[round(hko_point, 1)],
-                source="Hong Kong Observatory forecast only; HKO history unavailable",
+                samples=samples,
+                source=self._fallback_source(bool(om_summary)),
                 metadata={
                     "hko_point": hko_point,
+                    "metric": metric,
                     "historical_sample_count": 0,
+                    "historical_row_count": 0,
+                    "historical_year_count": 0,
+                    "open_meteo": om_summary,
                     "confidence_reason": "No HKO historical calibration rows were available.",
-                    "open_meteo_available": bool(open_meteo_samples),
+                    "open_meteo_available": bool(om_summary),
+                    "observed_temperature_c": observed_temperature,
+                    "observed_constraint_applied": observed_temperature is not None and target_date == effective_today,
                 },
             )
 
         baseline = median(values)
-        horizon_days = max(0, (target_date - date.today()).days)
+        horizon_days = max(0, (target_date - effective_today).days)
         error_scale = self._forecast_error_scale(horizon_days)
         error_cap = self._forecast_error_cap(horizon_days)
         historical_offsets = [
             _clamp((value - baseline) * error_scale, -error_cap, error_cap)
             for value in values
         ]
-        om_samples = [float(value) for value in (open_meteo_samples or []) if value is not None]
-        om_summary = self._open_meteo_summary(om_samples)
         disagreement = (om_summary["median"] - hko_point) if om_summary else 0.0
         center = hko_point + (disagreement * 0.25 if om_summary else 0.0)
         spread_factor = self._spread_factor(disagreement, bool(om_summary))
 
-        samples = [round(center + offset * spread_factor, 1) for offset in historical_offsets]
+        samples = [center + offset * spread_factor for offset in historical_offsets]
         if om_samples:
             om_center = median(om_samples)
-            samples.extend(round(center + (value - om_center) * 0.5, 1) for value in om_samples)
-        samples = self._apply_observed_constraint(samples, metric, target_date, observed_temperature)
+            samples.extend(center + (value - om_center) * 0.5 for value in om_samples)
+        samples = self._apply_observed_constraint(
+            samples,
+            metric,
+            target_date,
+            observed_temperature,
+            effective_today,
+        )
 
         source = "HKO 9-day forecast calibrated with HKO forecast-error proxy"
         if om_summary:
@@ -74,6 +97,8 @@ class HKOMarketProbabilityEngine:
             "metric": metric,
             "seasonal_baseline": round(baseline, 2),
             "historical_sample_count": len(values),
+            "historical_row_count": len(candidates),
+            "historical_year_count": len(values),
             "historical_years": sorted({row["date"].year for row in candidates}),
             "open_meteo_available": bool(om_summary),
             "open_meteo": om_summary,
@@ -83,7 +108,7 @@ class HKOMarketProbabilityEngine:
             "forecast_error_scale": round(error_scale, 2),
             "forecast_error_cap_c": round(error_cap, 2),
             "observed_temperature_c": observed_temperature,
-            "observed_constraint_applied": observed_temperature is not None and target_date == date.today(),
+            "observed_constraint_applied": observed_temperature is not None and target_date == effective_today,
             "confidence_reason": self.confidence_reason(len(values), disagreement if om_summary else None),
         }
         return ProbabilityResult(samples=samples, source=source, metadata=metadata)
@@ -95,7 +120,7 @@ class HKOMarketProbabilityEngine:
 
     def confidence_reason(self, sample_count: int, disagreement: float | None) -> str:
         if sample_count < 10:
-            return "Low confidence: fewer than 10 matching HKO seasonal history rows."
+            return "Low confidence: fewer than 10 matching HKO seasonal history years."
         if disagreement is None:
             return "Medium confidence: HKO history is available, but Open-Meteo comparison failed."
         abs_disagreement = abs(disagreement)
@@ -114,7 +139,7 @@ class HKOMarketProbabilityEngine:
             and _day_distance(row["date"], target_date) <= self.window_days
             and row.get("completeness") == "C"
         ]
-        if len(candidates) >= 10:
+        if self._distinct_year_count(candidates) >= 10:
             return candidates
         return [
             row
@@ -123,6 +148,18 @@ class HKOMarketProbabilityEngine:
             and _day_distance(row["date"], target_date) <= self.window_days
             and row.get("completeness") == "C"
         ]
+
+    def _seasonal_yearly_values(self, candidates: list[dict[str, Any]]) -> list[float]:
+        if not candidates:
+            return []
+        sorted_candidates = sorted(candidates, key=lambda row: (row["date"].year, row["date"]))
+        yearly_values: list[float] = []
+        for _, rows in groupby(sorted_candidates, key=lambda row: row["date"].year):
+            yearly_values.append(median([row["value"] for row in rows]))
+        return yearly_values
+
+    def _distinct_year_count(self, rows: list[dict[str, Any]]) -> int:
+        return len({row["date"].year for row in rows})
 
     def _open_meteo_summary(self, samples: list[float]) -> dict[str, float] | None:
         if not samples:
@@ -162,12 +199,23 @@ class HKOMarketProbabilityEngine:
         metric: str,
         target_date: date,
         observed_temperature: float | None,
+        reference_date: date,
     ) -> list[float]:
-        if observed_temperature is None or target_date != date.today():
+        if observed_temperature is None or target_date != reference_date:
             return samples
         if metric == "max":
             return [max(value, observed_temperature) for value in samples]
         return [min(value, observed_temperature) for value in samples]
+
+    def _fallback_samples(self, hko_point: float, om_samples: list[float]) -> list[float]:
+        if om_samples:
+            return [float(value) for value in om_samples]
+        return [hko_point + offset for offset in (-1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5)]
+
+    def _fallback_source(self, has_open_meteo: bool) -> str:
+        if has_open_meteo:
+            return "Open-Meteo ensemble only; HKO history unavailable"
+        return "Hong Kong Observatory forecast with synthetic uncertainty band; HKO history unavailable"
 
 
 def _day_distance(left: date, right: date) -> int:

@@ -24,7 +24,7 @@ class SignalEngine:
         self.max_size_usd = max_size_usd
 
     def scan(self, limit: int = 150) -> list[Signal]:
-        today = date.today()
+        today = self.weather.local_today("hong kong")
         markets = [
             market
             for market in self.polymarket.weather_markets(limit=limit)
